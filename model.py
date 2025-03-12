@@ -13,55 +13,37 @@ class MyModel(nn.Module):
         dec_state = self.decoder.init_state(enc_output)
         return self.decoder(dec_X, dec_state)
 
-class EncoderDecoder(nn.Module):
-    def __init__(self, encoder, decoder, **kwargs) -> None:
-        super(EncoderDecoder, self).__init__(**kwargs)
-        self.encoder = encoder
-        self.decoder = decoder
-    
-    def foward(self, enc_X, dec_X, *args):
-        enc_output = self.encoder(enc_X, *args)
-        dec_state = self.decoder.init_state(enc_output, *args)
-        return self.decoder(dec_X, dec_state)
     
 class Seq2SeqEncoder(nn.Module):
     def __init__(self, input_size, num_hiddens, num_layers, dropout=0, **kwarg) -> None:
         super(Seq2SeqEncoder, self).__init__(**kwarg)
-        self.dense = nn.Linear(input_size, num_hiddens)
-        self.rnn = nn.GRU(num_hiddens, num_hiddens, num_layers, dropout=dropout)
+        self.rnn = nn.GRU(input_size, num_hiddens, num_layers, dropout=dropout)
     
     def forward(self, X, *args):
         #embed后X为batchsize, timestep, embedsize
         #X = self.embedding(X)
         #adjust it to (timestep, batchsize, embedsize)
-        X = self.dense(X)
         X = X.permute(1, 0, 2)
         out_put, state = self.rnn(X)
         #the shape of output is timestep, batchsize, num_hiddens
         #the shape of state is numlayers, batchsize, num_hiddens
-        return out_put, state
+        return out_put.permute(1, 0, 2), state
 
 class Seq2SeqDecoder(nn.Module):
     def __init__(self, dec_input_size, num_hiddens, dec_out_put_size, num_layers, dropout=0, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.dense1 = nn.Linear(dec_input_size, num_hiddens)
-        self.rnn = nn.GRU(num_hiddens + num_hiddens, num_hiddens, num_layers, dropout=dropout)
-        self.dense2 = nn.Linear(num_hiddens, dec_out_put_size)
+        self.rnn = nn.GRU(num_hiddens + dec_input_size, num_hiddens, num_layers, dropout=dropout)
+        self.dense = nn.Linear(num_hiddens, dec_out_put_size)
     
     def init_state(self, enc_output, *args):
         return enc_output[1]
 
     def forward(self, X: torch.Tensor, state):
-        X = self.dense1(X)
         X = X.permute(1, 0, 2)
-        #X.shape is num_step, batch_size, embed_size
-        #the shape of state is num_layers, batch_size, num_hiddens
         context = state[-1].repeat(X.shape[0], 1, 1)
         X_and_context = torch.cat((X, context), dim=2)
         output, state = self.rnn(X_and_context, state)
-        output = self.dense2(output).permute(1, 0, 2)
-        #state.shape is num_layers, batch_size, num_hiddens
-        #output_shape is batch_size, num_steps, vocab_size
+        output = self.dense(output).permute(1, 0, 2)
         return output, state
 
 def train_seq2seq(net, data_iter, lr, num_epochs, device):
